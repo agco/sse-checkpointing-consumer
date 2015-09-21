@@ -5,8 +5,12 @@
 var consumer = require('sse-checkpointing-consumer'),
     request = require('request');
 
+var rabbit;
+// initialise jackrabbit
 var redis;
 // initialise redis
+
+var exchange = rabbit.topic('change.events');
 
 consumer
     .consume(function makeSSEStream(lastEventId) {
