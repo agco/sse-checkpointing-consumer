@@ -7,8 +7,6 @@ var consumer = require('sse-checkpointing-consumer'),
 
 var rabbit;
 // initialise jackrabbit
-var redis;
-// initialise redis
 
 var exchange = rabbit.topic('change.events');
 
