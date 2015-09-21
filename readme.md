@@ -26,10 +26,16 @@ consumer
             exchange.publish({text: sse.data}, {key: sse.event}).on('drain', resolve);
         })
     })
-    .checkpoint(redis, {time: '10s', messages: 5});
+    .checkpoint({redisUrl: 'redis://someuser:secret@localhost:10242', time: '10s', messages: 5});
 
 function grabToken() {
     // fetch a token from the oauth2 authorization server
 }
+
+// monitor stream health
+setTimeout(function () {
+    var lastProcessedTime = consumer.getLastProcessedTime();
+    // report current time - lastProcessedTime to new relic
+}, 30000);
 
 ```
