@@ -12,7 +12,7 @@ var exchange = rabbit.topic('change.events');
 
 consumer
     .consume(function makeSSEStream(lastEventId) {
-        grabToken().then(function(token) {
+        return grabToken().then(function(token) {
             return request({
                 uri: 'http://myapi.example.com/changes/stream?resources=trackingData,equipment',
                 headers: {'Authorization': 'Bearer ' + token, 'last-event-id': lastEventId}
