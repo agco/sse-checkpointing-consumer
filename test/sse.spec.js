@@ -1,9 +1,12 @@
 //modules
+var _ = require('lodash');
 var chai = require('chai');
 var ess = require('event-source-stream');
+var EventSource = require('eventsource');
 var expect = chai.expect;
 var express = require('express');
 var jsc = require('jsverify');
+var Promise = require('bluebird');
 var request = require('request');
 var sinon = require('sinon');
 var sinonChai = require('sinon-chai');
@@ -20,13 +23,15 @@ var port = 3000;
 var redisUrl = 'tcp://localhost:6379';
 var redisClient = redis.createClient(redisUrl);
 var streamURL = 'http://localhost:'+port+'/stream';
+var streamThreeURL = 'http://localhost:'+port+'/streamThree';
+var streamSixURL = 'http://localhost:'+port+'/streamSix';
 
 describe('SSE Checkpointing Consumer module', function() {
 
     before(function() {
-        app.get('/stream', sse.head(), sse.ticker({seconds: 3}), function(req, res) {
-            sse.send({event: 'data', data: {foo: 'bar'}})(req, res);
-        });
+        createStreamRoute(app, '/stream', 1, 'bar');
+        createStreamRoute(app, '/streamThree', 3, 'bar');
+        createStreamRoute(app, '/streamSix', 6, 'bar');
 
         var server = app.listen(port, function() {
             var host = server.address().address;
@@ -45,7 +50,7 @@ describe('SSE Checkpointing Consumer module', function() {
         });
 
         it('returns the consumer for chaining', function() {
-            expect(consumer.consume(function(){})).to.equal(consumer);
+            expect(consumer.consume(createStream(streamURL))).to.equal(consumer);
         });
 
         it('throws an error if it\'s not passed a function', function() {
@@ -54,14 +59,13 @@ describe('SSE Checkpointing Consumer module', function() {
 
         it('calls the callback', function() {
             var callback = sinon.spy();
-            consumer.consume(callback);
+            expect(consumer.consume.bind(consumer, callback)).to.throw(Error);
             expect(callback).to.be.calledOnce;
         });
 
         it('binds the stream to the object', function() {
-            function testStream() {return 'stream';}
-            consumer.consume(testStream);
-            expect(consumer.stream).to.equal('stream');
+            consumer.consume(createStream(streamURL));
+            expect(consumer.stream.on).to.be.a.function;
         });
 
         it('catches callback errors and propagates them', function() {
@@ -79,32 +83,20 @@ describe('SSE Checkpointing Consumer module', function() {
         });
 
         it('calls the onEvent hook', function(done) {
-             consumer.consume(createStream)
+             consumer.consume(createStream(streamURL))
                  .onEvent(function(data) {
-                     expect(data.foo).to.equal('bar');
+                     expect(JSON.parse(data.data).foo).to.equal('bar');
+                     expect(data.id).to.equal("0");
                      done();
+                     return true;
                  });
         });
 
         it('returns the original consumer', function() {
             var testConsumer = consumer
-                .consume(createStream)
-                .onEvent(function() {});
+                .consume(createStream(streamURL))
+                .onEvent(function() {return true;});
             expect(testConsumer).to.equal(consumer);
-        });
-
-        it('allows multiple onEvent hooks', function(done) {
-            var hookCounter = 0;
-
-            consumer.consume(createStream)
-                .onEvent(function() {
-                    hookCounter++;
-                })
-                .onEvent(function() {
-                    hookCounter++;
-                    expect(hookCounter).to.equal(2);
-                    done()
-                });
         });
     });
 
@@ -118,18 +110,52 @@ describe('SSE Checkpointing Consumer module', function() {
             expect(consumer.checkpoint.bind(consumer, {})).to.throw(Error, /You must supply a Redis url/);
         });
 
-        it('creates a checkpoint after receiving x messages', function() {
+        it('creates a checkpoint after receiving 1 message', function() {
             consumer
-                .consume(createStream)
+                .consume(createStream(streamThreeURL))
                 .checkpoint({
                     redisUrl: redisUrl,
                     messages: 1
                 });
 
-            return redisClient.get('checkpoint')
-                .then(function(checkpoint) {
-                    expect(checkpoint).to.not.be.null;
+            return Promise.delay(50).then(function(){
+                return redisClient.get('checkpoint')
+                    .then(function(checkpoint) {
+                        expect(checkpoint).to.not.be.null;
+                    });
+            });
+        });
+
+        it('creates a checkpoint after receiving 3 messages', function() {
+            consumer
+                .consume(createStream(streamThreeURL))
+                .checkpoint({
+                    redisUrl: redisUrl,
+                    messages: 1
                 });
+
+            return Promise.delay(50).then(function(){
+                return redisClient.get('checkpoint')
+                    .then(function(checkpoint) {
+                        expect(JSON.parse(checkpoint).id).to.equal('2');
+                    });
+            });
+        });
+
+        it('allows the message threshold to be set', function() {
+            consumer
+                .consume(createStream(streamSixURL))
+                .checkpoint({
+                    redisUrl: redisUrl,
+                    messages: 2
+                });
+
+            return Promise.delay(50).then(function(){
+                return redisClient.get('checkpoint')
+                    .then(function(checkpoint) {
+                        expect(JSON.parse(checkpoint).id).to.equal('5');
+                    });
+            });
         });
     });
 
@@ -147,19 +173,44 @@ describe('SSE Checkpointing Consumer module', function() {
         it.skip('returns a stream for requestjs', function(done) {
             request.get(streamURL)
                 .on('data', function(data) {
-                    console.log('data', data);
                     done();
                 });
         });
 
-        it('returns a stream for event-emitter', function(done) {
+        it('returns a stream for event-source-stream', function(done) {
             ess(streamURL, {json: true})
                 .on('data', function(data) {
-                    expect(data.foo).to.equal('bar');
+                    expect(JSON.parse(data.data).foo).to.equal('bar');
                     done();
                 });
+        });
+
+        it.skip('works for eventsource', function(done) {
+            var es = new EventSource(streamURL);
+
+            es.onmessage = function(event) {
+                expect(event.data).to.exist;
+                done();
+            }
         });
     });
 });
 
-function createStream() {return ess(streamURL, {json: true});}
+function createStream(url) {
+    return function() {
+        return request(url);
+        //return ess(url, {json: true});
+    };
+}
+
+function createStreamRoute(app, routeName, times, body) {
+    routeName = routeName || '/stream';
+    times = times || 1;
+    body = body || 'data';
+
+    app.get(routeName, sse.head(), sse.ticker({seconds: 3}), function(req, res) {
+        _.times(times, function(id) {
+            sse.send({event: 'who knows', data: {foo: body}, id: id.toString()})(req, res);
+        });
+    });
+}
