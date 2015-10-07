@@ -41,7 +41,8 @@ describe('SSE Checkpointing Consumer module', function() {
     });
 
     beforeEach(function() {
-        consumer = new Consumer();
+        consumer = new Consumer(redisUrl);
+        return redisClient.flushdb();
     });
 
     describe('#consume', function() {
@@ -59,8 +60,11 @@ describe('SSE Checkpointing Consumer module', function() {
 
         it('calls the callback', function() {
             var callback = sinon.spy();
-            expect(consumer.consume.bind(consumer, callback)).to.throw(Error);
-            expect(callback).to.be.calledOnce;
+            consumer.consume(callback);
+            return Promise.delay(50)
+                .then(function() {
+                    expect(callback).to.be.calledOnce;
+                });
         });
 
         it('binds the stream to the object', function() {
@@ -68,47 +72,80 @@ describe('SSE Checkpointing Consumer module', function() {
             expect(consumer.stream.on).to.be.a.function;
         });
 
+        it('allows callbacks that return a promise', function() {
+            consumer.consume(createStream(streamURL, true));
+            expect(consumer.stream).to.be.an.instanceOf(Promise);
+        });
+
         it('catches callback errors and propagates them', function() {
             function willFail() {throw new Error("Cannot connect to stream")}
-            var curriedConsume = consumer.consume.bind(consumer, willFail);
-            expect(curriedConsume).to.throw(Error, /Could not establish SSE stream/);
+            try {
+                consumer.consume(willFail);
+            } catch (err) {
+                expect(err).to.be.an.instanceOf(Error);
+                done();
+            }
+        });
+
+        describe('when there is an existing id', function() {
+            beforeEach(function() {
+                consumer
+                    .consume(createStream(streamURL, true))
+                    .checkpoint({
+                        redisUrl: redisUrl,
+                        messages: 1
+                    });
+                return Promise.delay(50);
+            });
+
+            it('passes the id to the consume function', function(done) {
+                var secondConsumer = new Consumer(redisUrl);
+
+                secondConsumer
+                    .consume(checkId)
+                    .checkpoint({
+                        messages: 1
+                    });
+
+                function checkId(id) {
+                    expect(id).to.exist;
+                    done();
+                    return createStream(streamURL);
+                }
+            });
+
+
         });
     });
 
     describe('#onEvent', function() {
         describe('when a stream has not been consumed yet', function() {
             it('throws an error', function() {
-                expect(consumer.onEvent).to.throw(Error, /A stream must be consumed first/);
+                expect(consumer.onEvent.bind(consumer)).to.throw(Error, /A stream must be consumed first/);
             });
         });
 
-        it('calls the onEvent hook', function(done) {
-             consumer.consume(createStream(streamURL))
-                 .onEvent(function(data) {
-                     expect(JSON.parse(data.data).foo).to.equal('bar');
-                     expect(data.id).to.equal("0");
-                     done();
-                     return true;
-                 });
-        });
+        describe('when a stream has been consumed', function() {
+            it('calls the onEvent hook', function(done) {
+                 consumer.consume(createStream(streamURL))
+                     .onEvent(function(data) {
+                         expect(JSON.parse(data.data).foo).to.equal('bar');
+                         expect(data.id).to.equal("0");
+                         done();
+                         return true;
+                     });
+            });
 
-        it('returns the original consumer', function() {
-            var testConsumer = consumer
-                .consume(createStream(streamURL))
-                .onEvent(function() {return true;});
-            expect(testConsumer).to.equal(consumer);
+            it('returns the original consumer', function() {
+                var testConsumer = consumer
+                    .consume(createStream(streamURL))
+                    .onEvent(function() {return true;});
+                expect(testConsumer).to.equal(consumer);
+            });
         });
     });
 
     describe('#checkpoint', function() {
-        beforeEach(function() {
-            return redisClient.flushdb();
-        });
-
-        it('throws an error if you do not supply a redis url', function() {
-            expect(consumer.checkpoint).to.throw(Error, /You must supply options/);
-            expect(consumer.checkpoint.bind(consumer, {})).to.throw(Error, /You must supply a Redis url/);
-        });
 
         it('creates a checkpoint after receiving 1 message', function() {
             consumer
@@ -160,45 +197,20 @@ describe('SSE Checkpointing Consumer module', function() {
     });
 
     describe('#getLastProcessedTime', function() {
-
-    });
-
-    describe('Test various request modules', function() {
-
-
-        /*
-            Request does not parse event data easily, and testing against
-            event-emitter will work better here
-        */
-        it.skip('returns a stream for requestjs', function(done) {
-            request.get(streamURL)
-                .on('data', function(data) {
-                    done();
-                });
-        });
-
-        it('returns a stream for event-source-stream', function(done) {
-            ess(streamURL, {json: true})
-                .on('data', function(data) {
-                    expect(JSON.parse(data.data).foo).to.equal('bar');
-                    done();
-                });
-        });
-
-        it.skip('works for eventsource', function(done) {
-            var es = new EventSource(streamURL);
-
-            es.onmessage = function(event) {
-                expect(event.data).to.exist;
-                done();
-            }
+        it('gets the unix seconds when the last event was processed', function() {
+            consumer.consume(createStream(streamSixURL));
+            return Promise.delay(50).then(function() {
+                expect(consumer.getLastProcessedTime()).to.be.a.Number;
+            });
         });
     });
 });
 
-function createStream(url) {
+function createStream(url, promise) {
     return function() {
-        return request(url);
+        return promise ?
+            new Promise(function(res) {res(request(url));}) :
+            request(url);
         //return ess(url, {json: true});
     };
 }
