@@ -147,61 +147,75 @@ describe('SSE Checkpointing Consumer module', function() {
 
     describe('#checkpoint', function() {
 
-        it('creates a checkpoint after receiving 1 message', function() {
+        it('creates a checkpoint after receiving 1 message', function(done) {
             consumer
                 .consume(createStream(streamThreeURL))
                 .checkpoint({
                     redisUrl: redisUrl,
-                    messages: 1
+                    messages: 1,
+                    callback: checkCheckpoint
                 });
 
-            return Promise.delay(50).then(function(){
+            function checkCheckpoint(){
                 return redisClient.get('checkpoint')
                     .then(function(checkpoint) {
                         expect(checkpoint).to.not.be.null;
+                        done();
                     });
-            });
+            }
         });
 
-        it('creates a checkpoint after receiving 3 messages', function() {
+        it('creates a checkpoint after receiving 3 messages', function(done) {
             consumer
                 .consume(createStream(streamThreeURL))
                 .checkpoint({
                     redisUrl: redisUrl,
-                    messages: 1
+                    messages: 1,
+                    callback: checkCheckpoint
                 });
 
-            return Promise.delay(50).then(function(){
+            function checkCheckpoint(){
                 return redisClient.get('checkpoint')
                     .then(function(checkpoint) {
                         expect(JSON.parse(checkpoint).id).to.equal('2');
+                        done();
                     });
-            });
+            }
         });
 
-        it('allows the message threshold to be set', function() {
+        it('allows the message threshold to be set', function(done) {
             consumer
                 .consume(createStream(streamSixURL))
                 .checkpoint({
                     redisUrl: redisUrl,
-                    messages: 2
+                    messages: 2,
+                    callback: checkCheckpoint
                 });
 
-            return Promise.delay(50).then(function(){
+            function checkCheckpoint(){
                 return redisClient.get('checkpoint')
                     .then(function(checkpoint) {
                         expect(JSON.parse(checkpoint).id).to.equal('5');
+                        done();
                     });
-            });
+            }
         });
     });
 
     describe('#getLastProcessedTime', function() {
-        it('gets the unix seconds when the last event was processed', function() {
-            consumer.consume(createStream(streamSixURL));
-            return Promise.delay(50).then(function() {
+        it('gets the unix seconds when the last event was processed', function(done) {
+            consumer
+                .consume(createStream(streamSixURL))
+                .checkpoint({
+                    redisUrl: redisUrl,
+                    messages: 6,
+                    callback: checkLastProcessed
+                });
+
+            function checkLastProcessed() {
                 expect(consumer.getLastProcessedTime()).to.be.a.Number;
-            });
+                done();
+            }
         });
     });
 });
@@ -224,5 +238,6 @@ function createStreamRoute(app, routeName, times, body) {
         _.times(times, function(id) {
             sse.send({event: 'who knows', data: {foo: body}, id: id.toString()})(req, res);
         });
+        res.end();
     });
 }
