@@ -1,14 +1,38 @@
 # SSE Checkpointing Consumer
 
-SSE Checkpointing Consumer implements a stream-based consumer for Server-sent
-events with guarantees of hook success with automatic retries and stream
-pausing. It optionally uses Redis to store checkpoint messages to be recalled
-when creating the stream.
+SSE Checkpointing Consumer implements a **reliable** stream-based consumer for Server-sent
+events. Upon receiving an event it's dispatched to a user provided function which will be retried until successful, failures are re-offered with an incremental back-off period. 
 
-## Example
+**Robust at-least-once processing** is ensured with a **persistent checkpointing** mechanism, every x messages the id of the last processed message is written to Redis. When the process crashes and restarts the checkpoint value is passed on to the user provided createSSEStream function, which in turn can initiate the stream with a last-event-id header to pick up where it left off.  
+
+## Usage
+```javascript
+ var Consumer = require('sse-checkpointing-consumer');
+
+ new Consumer().consume(createStream)
+ 	.onEvent(eventHook)
+	.checkpoint(checkpointOptions);
+    	
+ // must return a readable stream that follows [Server-Sent Events spec](http://www.w3.org/TR/eventsource/)
+ function createSSEStream(lastEventId) {
+ }
+ 
+ // eventHook is called with a single event chunk
+ // will be retried until hook returns a successful promise or truthy value
+ function eventHook(chunk) {
+ }
+ 
+ var checkpointOptions = {
+ 	redisUrl: 'tcp://localhost:6379', // a redis url which specifies host, port and optionally credentials
+	messages: 1 // checkpoint rate. e.g. 1: checkpoint after 1 message processed, 5: checkpoint after 5 messages processed
+ }
+   	
+```
+
+
+## Example - Bridge SSE to AMQP
 ```javascript
 var Consumer = require('sse-checkpointing-consumer'),
-    consumer = new Consumer(),
     request = require('request');
 
 var rabbit;
@@ -16,8 +40,8 @@ var rabbit;
 
 var exchange = rabbit.topic('change.events');
 
-consumer
-    .consume(function makeSSEStream(lastEventId) {
+new Consumer()
+    .consume(function createSSEStream(lastEventId) {
         return grabToken().then(function(token) {
             return request({
                 uri: 'http://myapi.example.com/changes/stream?resources=trackingData,equipment',
@@ -37,26 +61,3 @@ function grabToken() {
 }
 ```
 
-## Usage
-```javascript
- var Consumer = require('sse-checkpointing-consumer');
-
- //must return a readable stream that follows EventSource spec
- function createStream(lastCheckpointId) {
- }
- 
- //eventHook is called with a single event chunk
- //will be retried until hook returns a successful promise or truthy value
- function eventHook(chunk) {
- }
- 
- var consumer = new Consumer();
- 
- consumer.consume(createStream)
- 	.onEvent(eventHook)
-    .checkpoint({
-    	redisUrl: 'tcp://localhost:6379',
-	    messages: 1,
-    	callback: checkCheckpoint
-    });
-```
