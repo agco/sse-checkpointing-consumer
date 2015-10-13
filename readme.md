@@ -1,6 +1,6 @@
 # SSE Checkpointing Consumer
 
-SSE Checkpointing Consumer implements a **reliable** stream-based consumer for **Server-sent
+SSE Checkpointing Consumer implements a **reliable** Nodejs stream-based consumer for **Server-sent
 events**. Upon receiving an event it's dispatched to a user provided eventHook function which will be retried until successful, failures are re-offered after an incremental back-off period. 
 
 **Robust at-least-once processing** is ensured with a **persistent checkpointing** mechanism, every x messages the id of the last processed message is written to Redis. When the process crashes and restarts the checkpointed value is passed on to the user provided createSSEStream function, which in turn can initiate the stream with a last-event-id header to pick up where it left off.  
