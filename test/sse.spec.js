@@ -1,14 +1,10 @@
 //modules
 var _ = require('lodash');
 var chai = require('chai');
-var ess = require('event-source-stream');
-var EventSource = require('eventsource');
 var expect = chai.expect;
 var express = require('express');
-var jsc = require('jsverify');
 var Promise = require('bluebird');
 var request = require('request');
-var sinon = require('sinon');
 var sinonChai = require('sinon-chai');
 var sse = require('tiny-sse');
 var redis = require('then-redis');
@@ -41,7 +37,7 @@ describe('SSE Checkpointing Consumer module', function() {
     });
 
     beforeEach(function() {
-        consumer = new Consumer(redisUrl);
+        consumer = new Consumer();
         return redisClient.flushdb();
     });
 
@@ -58,52 +54,31 @@ describe('SSE Checkpointing Consumer module', function() {
             expect(consumer.consume).to.throw(Error, /Module requires function/);
         });
 
-        it('calls the callback', function() {
-            var callback = sinon.spy();
-            consumer.consume(callback);
-            return Promise.delay(50)
-                .then(function() {
-                    expect(callback).to.be.calledOnce;
-                });
-        });
-
-        it('binds the stream to the object', function() {
+        it('binds the createStream to the object', function() {
             consumer.consume(createStream(streamURL));
-            expect(consumer.stream.on).to.be.a.function;
-        });
-
-        it('allows callbacks that return a promise', function() {
-            consumer.consume(createStream(streamURL, true));
-            expect(consumer.stream).to.be.an.instanceOf(Promise);
-        });
-
-        it('catches callback errors and propagates them', function() {
-            function willFail() {throw new Error("Cannot connect to stream")}
-            try {
-                consumer.consume(willFail);
-            } catch (err) {
-                expect(err).to.be.an.instanceOf(Error);
-                done();
-            }
+            expect(typeof consumer.streamConstructor).to.equal('function');
         });
 
         describe('when there is an existing id', function() {
-            beforeEach(function() {
+            beforeEach(function(done) {
                 consumer
                     .consume(createStream(streamURL, true))
+                    .onEvent(emptyHook)
                     .checkpoint({
                         redisUrl: redisUrl,
-                        messages: 1
+                        messages: 1,
+                        callback: done
                     });
-                return Promise.delay(50);
             });
 
             it('passes the id to the consume function', function(done) {
-                var secondConsumer = new Consumer(redisUrl);
+                var secondConsumer = new Consumer();
 
                 secondConsumer
                     .consume(checkId)
+                    .onEvent(emptyHook)
                     .checkpoint({
+                        redisUrl: redisUrl,
                         messages: 1
                     });
 
@@ -121,7 +96,7 @@ describe('SSE Checkpointing Consumer module', function() {
     describe('#onEvent', function() {
         describe('when a stream has not been consumed yet', function() {
             it('throws an error', function() {
-                expect(consumer.onEvent.bind(consumer)).to.throw(Error, /A stream must be consumed first/);
+                expect(consumer.onEvent.bind(consumer)).to.throw(Error, /A stream constructor must be supplied first/);
             });
         });
 
@@ -133,7 +108,8 @@ describe('SSE Checkpointing Consumer module', function() {
                          expect(data.id).to.equal("0");
                          done();
                          return true;
-                     });
+                     })
+                     .checkpoint(false);
             });
 
             it('returns the original consumer', function() {
@@ -150,6 +126,7 @@ describe('SSE Checkpointing Consumer module', function() {
         it('creates a checkpoint after receiving 1 message', function(done) {
             consumer
                 .consume(createStream(streamThreeURL))
+                .onEvent(emptyHook)
                 .checkpoint({
                     redisUrl: redisUrl,
                     messages: 1,
@@ -168,6 +145,7 @@ describe('SSE Checkpointing Consumer module', function() {
         it('creates a checkpoint after receiving 3 messages', function(done) {
             consumer
                 .consume(createStream(streamThreeURL))
+                .onEvent(emptyHook)
                 .checkpoint({
                     redisUrl: redisUrl,
                     messages: 1,
@@ -186,6 +164,7 @@ describe('SSE Checkpointing Consumer module', function() {
         it('allows the message threshold to be set', function(done) {
             consumer
                 .consume(createStream(streamSixURL))
+                .onEvent(emptyHook)
                 .checkpoint({
                     redisUrl: redisUrl,
                     messages: 2,
@@ -206,6 +185,7 @@ describe('SSE Checkpointing Consumer module', function() {
         it('gets the unix seconds when the last event was processed', function(done) {
             consumer
                 .consume(createStream(streamSixURL))
+                .onEvent(emptyHook)
                 .checkpoint({
                     redisUrl: redisUrl,
                     messages: 6,
@@ -228,6 +208,8 @@ function createStream(url, promise) {
         //return ess(url, {json: true});
     };
 }
+
+function emptyHook(){return true;}
 
 function createStreamRoute(app, routeName, times, body) {
     routeName = routeName || '/stream';
