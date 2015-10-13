@@ -7,6 +7,38 @@ when creating the stream.
 
 ## Example
 ```javascript
+var Consumer = require('sse-checkpointing-consumer'),
+    consumer = new Consumer(),
+    request = require('request');
+
+var rabbit;
+// initialise jackrabbit
+
+var exchange = rabbit.topic('change.events');
+
+consumer
+    .consume(function makeSSEStream(lastEventId) {
+        return grabToken().then(function(token) {
+            return request({
+                uri: 'http://myapi.example.com/changes/stream?resources=trackingData,equipment',
+                headers: {'Authorization': 'Bearer ' + token, 'last-event-id': lastEventId}
+            });
+        })
+    })
+    .onEvent(function (sse) {
+        return new Promise(function (resolve) {
+            exchange.publish({text: sse.data}, {key: sse.event}).on('drain', resolve);
+        })
+    })
+    .checkpoint({redisUrl: 'redis://someuser:secret@localhost:10242', messages: 5});
+
+function grabToken() {
+    // fetch a token from the oauth2 authorization server
+}
+```
+
+## Usage
+```javascript
  var Consumer = require('sse-checkpointing-consumer');
 
  //must return a readable stream that follows EventSource spec
@@ -28,7 +60,3 @@ when creating the stream.
     	callback: checkCheckpoint
     });
 ```
-
-## Methods
-
-
