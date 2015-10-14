@@ -36,8 +36,8 @@ events**. Upon receiving an event it's dispatched to a user provided eventHook f
 var Consumer = require('sse-checkpointing-consumer'),
     request = require('request');
 
-var rabbit;
-// initialise jackrabbit
+var jackrabbit = require('jackrabbit');
+var rabbit = jackrabbit('amqp://guest:guest@localhost:5672);
 
 var exchange = rabbit.topic('change.events');
 
@@ -55,7 +55,7 @@ new Consumer()
             exchange.publish({text: sse.data}, {key: sse.event}).on('drain', resolve);
         })
     })
-    .checkpoint({redisUrl: 'redis://someuser:secret@localhost:10242', messages: 5});
+    .checkpoint({redisUrl: 'redis://guest:guest@localhost:10242', messages: 5});
 
 function grabToken() {
     // fetch a token from the oauth2 authorization server
