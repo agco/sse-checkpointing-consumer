@@ -37,7 +37,7 @@ var Consumer = require('sse-checkpointing-consumer'),
     request = require('request');
 
 var jackrabbit = require('jackrabbit');
-var rabbit = jackrabbit('amqp://guest:guest@localhost:5672);
+var rabbit = jackrabbit('amqp://guest:guest@localhost:5672');
 
 var exchange = rabbit.topic('change.events');
 
