@@ -13,8 +13,9 @@ events**. Upon receiving an event it's dispatched to a user provided eventHook f
  	.onEvent(eventHook)
 	.checkpoint(checkpointOptions);
     	
- // must return a readable stream that follows [Server-Sent Events spec](http://www.w3.org/TR/eventsource/)
+ // must return a readable stream that follows the Server-Sent Events spec : http://www.w3.org/TR/eventsource/
  function createSSEStream(lastEventId) {
+ 	// in order to resume the lastEventId parameter should be used as a last-event-id header when requesting the stream
  }
  
  // eventHook is called with a single event chunk
