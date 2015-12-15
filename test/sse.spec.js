@@ -85,7 +85,7 @@ describe('SSE Checkpointing Consumer module', function() {
                 function checkId(id) {
                     expect(id).to.exist;
                     done();
-                    return createStream(streamURL);
+                    return createStream(streamURL)();
                 }
             });
 
@@ -124,6 +124,7 @@ describe('SSE Checkpointing Consumer module', function() {
     describe('#checkpoint', function() {
 
         it('creates a checkpoint after receiving 1 message', function(done) {
+            var onceDone = _.once(done);
             consumer
                 .consume(createStream(streamThreeURL))
                 .onEvent(emptyHook)
@@ -137,12 +138,13 @@ describe('SSE Checkpointing Consumer module', function() {
                 return redisClient.get('checkpoint')
                     .then(function(checkpoint) {
                         expect(checkpoint).to.not.be.null;
-                        done();
+                        onceDone();
                     });
             }
         });
 
         it('creates a checkpoint after receiving 3 messages', function(done) {
+            var onceDone = _.once(done);
             consumer
                 .consume(createStream(streamThreeURL))
                 .onEvent(emptyHook)
@@ -156,12 +158,13 @@ describe('SSE Checkpointing Consumer module', function() {
                 return redisClient.get('checkpoint')
                     .then(function(checkpoint) {
                         expect(JSON.parse(checkpoint).id).to.equal('2');
-                        done();
+                        onceDone();
                     });
             }
         });
 
         it('allows the message threshold to be set', function(done) {
+            var onceDone = _.once(done);
             consumer
                 .consume(createStream(streamSixURL))
                 .onEvent(emptyHook)
@@ -175,7 +178,7 @@ describe('SSE Checkpointing Consumer module', function() {
                 return redisClient.get('checkpoint')
                     .then(function(checkpoint) {
                         expect(JSON.parse(checkpoint).id).to.equal('5');
-                        done();
+                        onceDone();
                     });
             }
         });
@@ -200,12 +203,11 @@ describe('SSE Checkpointing Consumer module', function() {
     });
 });
 
-function createStream(url, promise) {
+function createStream(url, isPromise) {
     return function() {
-        return promise ?
+        return isPromise ?
             new Promise(function(res) {res(request(url));}) :
             request(url);
-        //return ess(url, {json: true});
     };
 }
 
