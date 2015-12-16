@@ -13,7 +13,7 @@ chai.use(sinonChai);
 
 //locals
 var app = express();
-var Consumer = require('../lib/index.js');
+var Consumer = require('..');
 var consumer;
 var port = 3000;
 var redisUrl = 'tcp://localhost:6379';
@@ -21,6 +21,7 @@ var redisClient = redis.createClient(redisUrl);
 var streamURL = 'http://localhost:'+port+'/stream';
 var streamThreeURL = 'http://localhost:'+port+'/streamThree';
 var streamSixURL = 'http://localhost:'+port+'/streamSix';
+var streamFailURL = 'http://localhost:'+port+'/streamFail';
 
 describe('SSE Checkpointing Consumer module', function() {
 
@@ -28,6 +29,7 @@ describe('SSE Checkpointing Consumer module', function() {
         createStreamRoute(app, '/stream', 1, 'bar');
         createStreamRoute(app, '/streamThree', 3, 'bar');
         createStreamRoute(app, '/streamSix', 6, 'bar');
+        createStreamRoute(app, '/streamFail', 3, 'bar', true);
 
         var server = app.listen(port, function() {
             var host = server.address().address;
@@ -201,6 +203,28 @@ describe('SSE Checkpointing Consumer module', function() {
             }
         });
     });
+
+    describe('retries connection on failure', function() {
+        it('creates a checkpoint after receiving 3 messages', function(done) {
+            var onceDone = _.once(done);
+            consumer
+                .consume(createStream(streamFailURL))
+                .onEvent(emptyHook)
+                .checkpoint({
+                    redisUrl: redisUrl,
+                    messages: 1,
+                    callback: checkCheckpoint
+                });
+
+            function checkCheckpoint(){
+                return redisClient.get('checkpoint')
+                    .then(function(checkpoint) {
+                        expect(JSON.parse(checkpoint).id).to.equal('2');
+                        onceDone();
+                    });
+            }
+        });
+    });
 });
 
 function createStream(url, isPromise) {
@@ -213,15 +237,24 @@ function createStream(url, isPromise) {
 
 function emptyHook(){return true;}
 
-function createStreamRoute(app, routeName, times, body) {
+function createStreamRoute(app, routeName, times, body, fail) {
     routeName = routeName || '/stream';
     times = times || 1;
     body = body || 'data';
+    var shouldFail = fail;
 
     app.get(routeName, sse.head(), sse.ticker({seconds: 3}), function(req, res) {
         _.times(times, function(id) {
             sse.send({event: 'who knows', data: {foo: body}, id: id.toString()})(req, res);
         });
-        res.end();
+        if (shouldFail) {
+            shouldFail = false;
+            Promise.delay(1000).then(function() {
+                res.set('Connection', 'close');
+                res.end();
+            });
+        } else {
+            res.end();
+        }
     });
 }
